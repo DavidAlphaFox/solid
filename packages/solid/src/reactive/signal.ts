@@ -241,7 +241,6 @@ export function createSignal<T>(
     //引用类型（对象、数组、函数等）：比较引用地址，即是否指向同一个对象。
     //原始类型（number、string、boolean、null、undefined）：需要同类型，同数值
     //数值（number）特殊情况： NaN === NaN 返回 false
-
   };
 
   if (IS_DEV) {
@@ -1296,7 +1295,7 @@ export function enableExternalSource(
 //Signal中数据的通用读取方法，每次都是使用Bind，绑定到不同的SiganlState上
 // Internal
 export function readSignal(this: SignalState<any> | Memo<any>) {
-  const runningTransition = Transition && Transition.running;//是否又Transaction在执行
+  const runningTransition = Transition && Transition.running; //是否又Transaction在执行
   if (
     (this as Memo<any>).sources &&
     (runningTransition ? (this as Memo<any>).tState : (this as Memo<any>).state)
@@ -1354,9 +1353,9 @@ export function writeSignal(node: SignalState<any> | Memo<any>, value: any, isCo
       //当前的SignalState有观察者
       runUpdates(() => {
         /*
-          * 非空断言操作符（!）:
-          * 用于明确告诉 TypeScript 编译器：observers 的值此时一定不是 null 或 undefined，
-          * 即使类型系统认为它可能为空。
+         * 非空断言操作符（!）:
+         * 用于明确告诉 TypeScript 编译器：observers 的值此时一定不是 null 或 undefined，
+         * 即使类型系统认为它可能为空。
          */
         for (let i = 0; i < node.observers!.length; i += 1) {
           //遍历观察者
@@ -1566,7 +1565,7 @@ function runUpdates<T>(fn: () => T, init: boolean) {
   ExecCount++; // 执行次数 + 1
   try {
     const res = fn(); //执行函数
-    completeUpdates(wait);// 计算Update
+    completeUpdates(wait); // 计算Update
     return res; // 返回函数执行的结果
   } catch (err) {
     if (!wait) Effects = null;
@@ -1576,8 +1575,10 @@ function runUpdates<T>(fn: () => T, init: boolean) {
 }
 
 function completeUpdates(wait: boolean) {
-  if (Updates) { // 有Updates数组
-    if (Scheduler && Transition && Transition.running) scheduleQueue(Updates); //有Scheduler并且Transition在执行
+  if (Updates) {
+    // 有Updates数组
+    if (Scheduler && Transition && Transition.running)
+      scheduleQueue(Updates); //有Scheduler并且Transition在执行
     else runQueue(Updates); // 直接执行Updates数组
     Updates = null;
   }
@@ -1587,13 +1588,13 @@ function completeUpdates(wait: boolean) {
     if (!Transition.promises.size && !Transition.queue.size) {
       // finish transition
       const sources = Transition.sources; //Transition源
-      const disposed = Transition.disposed;//Transition已经处理的列表
+      const disposed = Transition.disposed; //Transition已经处理的列表
       Effects!.push.apply(Effects, Transition!.effects); //将Transition的effects放入Effects数组
       res = Transition.resolve; //解决Transition，获得结果
       for (const e of Effects!) {
         "tState" in e && (e.state = e.tState!);
         delete e.tState;
-      }// 更新所有effects的状态为tState
+      } // 更新所有effects的状态为tState
       Transition = null; // 清空Transaction
       runUpdates(() => {
         for (const d of disposed) cleanNode(d); //清理已经处置的列表
@@ -1616,8 +1617,8 @@ function completeUpdates(wait: boolean) {
       //Transition更新执行状态为false
       Transition.effects.push.apply(Transition.effects, Effects!);
       //将Effects放入Transition中
-      Effects = null;//清空全局Transition
-      setTransPending(true);//有未决Transition
+      Effects = null; //清空全局Transition
+      setTransPending(true); //有未决Transition
       return;
     }
   }
