@@ -457,7 +457,10 @@ export function createMemo<Next extends Prev, Init, Prev>(
     0,
     IS_DEV ? options : undefined
   ) as Partial<Memo<Init, Next>>;
-
+  /*Memo是基于Compution实现的
+   * 其中EffectFunction是一个有副作用的函数，会接收前值，创建新值
+   * value 可能是undefined
+   */
   c.observers = null;
   c.observerSlots = null;
   c.comparator = options.equals || undefined;
@@ -1075,9 +1078,11 @@ export function enableScheduling(scheduler = requestCallback) {
  * @description https://docs.solidjs.com/reference/reactive-utilities/start-transition
  */
 export function startTransition(fn: () => unknown): Promise<void> {
+  //启动Transition
   if (Transition && Transition.running) {
-    fn();
+    fn(); // 执行函数
     return Transition.done!;
+    //返回Transition的done，promise
   }
   const l = Listener;
   const o = Owner;
@@ -1123,6 +1128,7 @@ export type Transition = [Accessor<boolean>, (fn: () => void) => Promise<void>];
  */
 export function useTransition(): Transition {
   return [transPending, startTransition];
+  //返回是否有Transition处在Pending状态，以及startTransition函数
 }
 
 export function resumeEffects(e: Computation<any>[]) {
@@ -1295,32 +1301,45 @@ export function enableExternalSource(
 //Signal中数据的通用读取方法，每次都是使用Bind，绑定到不同的SiganlState上
 // Internal
 export function readSignal(this: SignalState<any> | Memo<any>) {
-  const runningTransition = Transition && Transition.running; //是否又Transaction在执行
+  const runningTransition = Transition && Transition.running;
+  //是否有Transaction在执行
   if (
     (this as Memo<any>).sources &&
     (runningTransition ? (this as Memo<any>).tState : (this as Memo<any>).state)
   ) {
+    // SignalState时没有sources的，只有Memo是有sources的
     if ((runningTransition ? (this as Memo<any>).tState : (this as Memo<any>).state) === STALE)
       updateComputation(this as Memo<any>); //有Transaction，并且状态为陈旧的，需要执行计算
     else {
       const updates = Updates;
+      // 创建Updates状态临时保存点
       Updates = null;
       runUpdates(() => lookUpstream(this as Memo<any>), false);
+      // 查询上游源
       Updates = updates;
+      //还原全局Updates
     }
   }
   if (Listener) {
+    // 有Listener
     const sSlot = this.observers ? this.observers.length : 0;
+    //观察者的数量
     if (!Listener.sources) {
+      // Listener的源不存在
       Listener.sources = [this];
+      // 把当前的Signal/Meno设置成源
       Listener.sourceSlots = [sSlot];
+      // 记录观察者在（this：SignalState<any> | Memo<any>）的位置
     } else {
       Listener.sources.push(this);
       Listener.sourceSlots!.push(sSlot);
     }
     if (!this.observers) {
+      // 没有观察者
       this.observers = [Listener];
+      // 把Listener设置为观察者
       this.observerSlots = [Listener.sources.length - 1];
+      // 记录（this：SignalState<any> | Memo<any>）在观察者源的位置
     } else {
       this.observers.push(Listener);
       this.observerSlots!.push(Listener.sources.length - 1);
@@ -1328,6 +1347,7 @@ export function readSignal(this: SignalState<any> | Memo<any>) {
   }
   if (runningTransition && Transition!.sources.has(this)) return this.tValue;
   return this.value;
+  //根据Transition的情况，返回tValue还是value
 }
 //为信号写入新的数据
 export function writeSignal(node: SignalState<any> | Memo<any>, value: any, isComp?: boolean) {
@@ -1388,8 +1408,10 @@ export function writeSignal(node: SignalState<any> | Memo<any>, value: any, isCo
 }
 
 function updateComputation(node: Computation<any>) {
+  //更新计算
   if (!node.fn) return;
   cleanNode(node);
+  //解除这个node和上游源的关系
   const time = ExecCount;
   runComputation(
     node,
@@ -1398,7 +1420,7 @@ function updateComputation(node: Computation<any>) {
       : node.value,
     time
   );
-
+  //执行计算
   if (Transition && !Transition.running && Transition.sources.has(node as Memo<any>)) {
     queueMicrotask(() => {
       runUpdates(() => {
@@ -1409,6 +1431,7 @@ function updateComputation(node: Computation<any>) {
       }, false);
     });
   }
+  //在Transaction中，需要放入Mirotask中
 }
 
 function runComputation(node: Computation<any>, value: any, time: number) {
@@ -1416,8 +1439,10 @@ function runComputation(node: Computation<any>, value: any, time: number) {
   const owner = Owner,
     listener = Listener;
   Listener = Owner = node;
+  //将Listener和Owner都设置成当前的node
   try {
     nextValue = node.fn(value);
+    //计算出新的值
   } catch (err) {
     if (node.pure) {
       if (Transition && Transition.running) {
@@ -1436,6 +1461,7 @@ function runComputation(node: Computation<any>, value: any, time: number) {
   } finally {
     Listener = listener;
     Owner = owner;
+    //重置所有的Listener和Owner
   }
   if (!node.updatedAt || node.updatedAt <= time) {
     if (node.updatedAt != null && "observers" in node) {
@@ -1712,16 +1738,23 @@ function markDownstream(node: Memo<any>) {
 }
 
 function cleanNode(node: Owner) {
+  //清理节点
   let i;
   if ((node as Computation<any>).sources) {
+    //如果有源
     while ((node as Computation<any>).sources!.length) {
+      //如果源的长度不为0
       const source = (node as Computation<any>).sources!.pop()!,
         index = (node as Computation<any>).sourceSlots!.pop()!,
         obs = source.observers;
+      //得到源，得到当前node在源上的observers中的index
       if (obs && obs.length) {
         const n = obs.pop()!,
           s = source.observerSlots!.pop()!;
+        //把observers的尾部数据拿出来
         if (index < obs.length) {
+          //如果index小于observers的长度，说明这个node在observers的中间位置
+          //将刚刚弹出的observers的数据，放到删除的位置
           n.sourceSlots![s] = index;
           obs[index] = n;
           source.observerSlots![index] = s;
