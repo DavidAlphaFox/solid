@@ -231,7 +231,7 @@ export function createSignal<T>(
   options?: SignalOptions<T | undefined>
 ): Signal<T | undefined> {
   options = options ? Object.assign({}, signalOptions, options) : signalOptions;
-
+  // 构建一个SignalState
   const s: SignalState<T | undefined> = {
     value,
     observers: null,
@@ -248,7 +248,7 @@ export function createSignal<T>(
       if (DevHooks.afterCreateSignal) DevHooks.afterCreateSignal(s);
     }
   }
-
+  // 如果Setter是一个Function的话执行Function，否则直接写入Signal
   const setter: Setter<T | undefined> = (value?: unknown) => {
     if (typeof value === "function") {
       if (Transition && Transition.running && Transition.sources.has(s)) value = value(s.tValue);
@@ -1288,7 +1288,7 @@ export function enableExternalSource(
     ExternalSourceConfig = { factory, untrack };
   }
 }
-
+//Signal中数据的通用读取方法，每次都是使用Bind，绑定到不同的SiganlState上
 // Internal
 export function readSignal(this: SignalState<any> | Memo<any>) {
   const runningTransition = Transition && Transition.running;
