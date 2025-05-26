@@ -1464,6 +1464,7 @@ function runComputation(node: Computation<any>, value: any, time: number) {
     //重置所有的Listener和Owner
   }
   if (!node.updatedAt || node.updatedAt <= time) {
+    // 如果当前更新的计算周期小于time
     if (node.updatedAt != null && "observers" in node) {
       writeSignal(node as Memo<any>, nextValue, true);
     } else if (Transition && Transition.running && node.pure) {
