@@ -237,6 +237,11 @@ export function createSignal<T>(
     observers: null,
     observerSlots: null,
     comparator: options.equals || undefined
+    //默认为 a === b
+    //引用类型（对象、数组、函数等）：比较引用地址，即是否指向同一个对象。
+    //原始类型（number、string、boolean、null、undefined）：需要同类型，同数值
+    //数值（number）特殊情况： NaN === NaN 返回 false
+
   };
 
   if (IS_DEV) {
@@ -1291,13 +1296,13 @@ export function enableExternalSource(
 //Signal中数据的通用读取方法，每次都是使用Bind，绑定到不同的SiganlState上
 // Internal
 export function readSignal(this: SignalState<any> | Memo<any>) {
-  const runningTransition = Transition && Transition.running;
+  const runningTransition = Transition && Transition.running;//是否又Transaction在执行
   if (
     (this as Memo<any>).sources &&
     (runningTransition ? (this as Memo<any>).tState : (this as Memo<any>).state)
   ) {
     if ((runningTransition ? (this as Memo<any>).tState : (this as Memo<any>).state) === STALE)
-      updateComputation(this as Memo<any>);
+      updateComputation(this as Memo<any>); //有Transaction，并且状态为陈旧的，需要执行计算
     else {
       const updates = Updates;
       Updates = null;
@@ -1325,32 +1330,52 @@ export function readSignal(this: SignalState<any> | Memo<any>) {
   if (runningTransition && Transition!.sources.has(this)) return this.tValue;
   return this.value;
 }
-
+//为信号写入新的数据
 export function writeSignal(node: SignalState<any> | Memo<any>, value: any, isComp?: boolean) {
   let current =
     Transition && Transition.running && Transition.sources.has(node) ? node.tValue : node.value;
+  //Transition包含了当前的Signal节点，取出tValue（事务值？），否则取value
   if (!node.comparator || !node.comparator(current, value)) {
+    //没有比较器，或者比较结果为两者不同
     if (Transition) {
+      //存在Transition
       const TransitionRunning = Transition.running;
+      // 执行状态
       if (TransitionRunning || (!isComp && Transition.sources.has(node))) {
+        //执行中或者处在非计算状态并且Transition源包含当前SignalState
         Transition.sources.add(node);
+        //将SignalState加入当前Transition的源中
         node.tValue = value;
+        //更新当前的SignalState的tValue为写入值
       }
-      if (!TransitionRunning) node.value = value;
-    } else node.value = value;
+      if (!TransitionRunning) node.value = value; //没有Transition执行，直接更新SignalState的value
+    } else node.value = value; //没有Transition，直接更新SignalState的value
     if (node.observers && node.observers.length) {
+      //当前的SignalState有观察者
       runUpdates(() => {
+        /*
+          * 非空断言操作符（!）:
+          * 用于明确告诉 TypeScript 编译器：observers 的值此时一定不是 null 或 undefined，
+          * 即使类型系统认为它可能为空。
+         */
         for (let i = 0; i < node.observers!.length; i += 1) {
+          //遍历观察者
           const o = node.observers![i];
           const TransitionRunning = Transition && Transition.running;
+          //获取Transaction的执行状态
           if (TransitionRunning && Transition!.disposed.has(o)) continue;
+          /*
+           * 正在执行Transaction，但是Transaction的已经处理的列表中含有观察者o
+           * 就直接跳过观察者o，继续执行
+           */
+
           if (TransitionRunning ? !o.tState : !o.state) {
-            if (o.pure) Updates!.push(o);
-            else Effects!.push(o);
+            if (o.pure) Updates!.push(o); //o是pure的，则放入Updates中
+            else Effects!.push(o); //o是非pure的，放入Effects
             if ((o as Memo<any>).observers) markDownstream(o as Memo<any>);
           }
-          if (!TransitionRunning) o.state = STALE;
-          else o.tState = STALE;
+          if (!TransitionRunning) o.state = STALE; //事务不在执行状态，标记o的state为陈旧的
+          else o.tState = STALE; //事务在执行状态，标记o的tState为陈旧
         }
         if (Updates!.length > 10e5) {
           Updates = [];
@@ -1360,7 +1385,7 @@ export function writeSignal(node: SignalState<any> | Memo<any>, value: any, isCo
       }, false);
     }
   }
-  return value;
+  return value; //写入后返回最新值
 }
 
 function updateComputation(node: Computation<any>) {
@@ -1484,12 +1509,16 @@ function createComputation<Next, Init = unknown>(
 
   return c;
 }
-
+//执行Computation
 function runTop(node: Computation<any>) {
   const runningTransition = Transition && Transition.running;
+  //是否有Transition在执行
   if ((runningTransition ? node.tState : node.state) === 0) return;
+  //已经执行过了这个Computation ？？？
   if ((runningTransition ? node.tState : node.state) === PENDING) return lookUpstream(node);
+  // 处在PENDING状态，说明有未决的状态阻碍它继续执行，寻找上游，并返回
   if (node.suspense && untrack(node.suspense.inFallback!)) return node.suspense.effects!.push(node);
+  // 该计算已经被暂停了，并且成功untrack成功
   const ancestors = [node];
   while (
     (node = node.owner as Computation<any>) &&
@@ -1497,38 +1526,48 @@ function runTop(node: Computation<any>) {
   ) {
     if (runningTransition && Transition!.disposed.has(node)) return;
     if (runningTransition ? node.tState : node.state) ancestors.push(node);
-  }
+  } // 循环构建祖先列表
   for (let i = ancestors.length - 1; i >= 0; i--) {
+    //反序遍历祖先列表，最下面的依赖在数组最后
     node = ancestors[i];
     if (runningTransition) {
+      // Transition在执行
       let top = node,
         prev = ancestors[i + 1];
       while ((top = top.owner as Computation<any>) && top !== prev) {
+        //如果Top的owner和prev不等，并且disposed有top，直接返回
         if (Transition!.disposed.has(top)) return;
       }
     }
     if ((runningTransition ? node.tState : node.state) === STALE) {
+      //Computation状态是陈旧的，直接计算该节点
       updateComputation(node);
     } else if ((runningTransition ? node.tState : node.state) === PENDING) {
+      //未决节点
       const updates = Updates;
+      //暂存当前的Updates
       Updates = null;
+      //清空全局Updates
       runUpdates(() => lookUpstream(node, ancestors[0]), false);
+      //重新对这个node的上游进行决策，并忽略，最开始传入需要计算的节点ancestors[0]
+      //防止出现循环依赖？？？
       Updates = updates;
+      //恢复全局Updates
     }
   }
 }
-
+//执行更新
 function runUpdates<T>(fn: () => T, init: boolean) {
-  if (Updates) return fn();
-  let wait = false;
-  if (!init) Updates = [];
-  if (Effects) wait = true;
-  else Effects = [];
-  ExecCount++;
+  if (Updates) return fn(); //有Updates则立刻执行并返回fn
+  let wait = false; // 等待状态为false
+  if (!init) Updates = []; //在非初始状态下，将Updates设置为空数组
+  if (Effects) wait = true; //Effects数组不为空，将等待状态设置成wait
+  else Effects = []; // 否则将Effects设置为空数组
+  ExecCount++; // 执行次数 + 1
   try {
-    const res = fn();
-    completeUpdates(wait);
-    return res;
+    const res = fn(); //执行函数
+    completeUpdates(wait);// 计算Update
+    return res; // 返回函数执行的结果
   } catch (err) {
     if (!wait) Effects = null;
     Updates = null;
@@ -1537,55 +1576,58 @@ function runUpdates<T>(fn: () => T, init: boolean) {
 }
 
 function completeUpdates(wait: boolean) {
-  if (Updates) {
-    if (Scheduler && Transition && Transition.running) scheduleQueue(Updates);
-    else runQueue(Updates);
+  if (Updates) { // 有Updates数组
+    if (Scheduler && Transition && Transition.running) scheduleQueue(Updates); //有Scheduler并且Transition在执行
+    else runQueue(Updates); // 直接执行Updates数组
     Updates = null;
   }
-  if (wait) return;
+  if (wait) return; //说明有Effect存在，直接返回
   let res;
   if (Transition) {
     if (!Transition.promises.size && !Transition.queue.size) {
       // finish transition
-      const sources = Transition.sources;
-      const disposed = Transition.disposed;
-      Effects!.push.apply(Effects, Transition!.effects);
-      res = Transition.resolve;
+      const sources = Transition.sources; //Transition源
+      const disposed = Transition.disposed;//Transition已经处理的列表
+      Effects!.push.apply(Effects, Transition!.effects); //将Transition的effects放入Effects数组
+      res = Transition.resolve; //解决Transition，获得结果
       for (const e of Effects!) {
         "tState" in e && (e.state = e.tState!);
         delete e.tState;
-      }
-      Transition = null;
+      }// 更新所有effects的状态为tState
+      Transition = null; // 清空Transaction
       runUpdates(() => {
-        for (const d of disposed) cleanNode(d);
+        for (const d of disposed) cleanNode(d); //清理已经处置的列表
         for (const v of sources) {
-          v.value = v.tValue;
+          v.value = v.tValue; //源中的value进行更新
           if ((v as Memo<any>).owned) {
             for (let i = 0, len = (v as Memo<any>).owned!.length; i < len; i++)
-              cleanNode((v as Memo<any>).owned![i]);
+              cleanNode((v as Memo<any>).owned![i]); //清理Owned
           }
           if ((v as Memo<any>).tOwned) (v as Memo<any>).owned = (v as Memo<any>).tOwned!;
-          delete v.tValue;
-          delete (v as Memo<any>).tOwned;
-          (v as Memo<any>).tState = 0;
+          // 更新owned为tOwned
+          delete v.tValue; //删除tValue
+          delete (v as Memo<any>).tOwned; // 删除tOwned
+          (v as Memo<any>).tState = 0; //重置tState
         }
-        setTransPending(false);
+        setTransPending(false); //已决所有Transition
       }, false);
     } else if (Transition.running) {
       Transition.running = false;
+      //Transition更新执行状态为false
       Transition.effects.push.apply(Transition.effects, Effects!);
-      Effects = null;
-      setTransPending(true);
+      //将Effects放入Transition中
+      Effects = null;//清空全局Transition
+      setTransPending(true);//有未决Transition
       return;
     }
   }
   const e = Effects!;
-  Effects = null;
-  if (e.length) runUpdates(() => runEffects(e), false);
+  Effects = null; //将Effects设置为空
+  if (e.length) runUpdates(() => runEffects(e), false); //执行所有Effects
   else if (IS_DEV) DevHooks.afterUpdate && DevHooks.afterUpdate();
   if (res) res();
 }
-
+//runEffects也是runQueue，effects是有副作用的Computation
 function runQueue(queue: Computation<any>[]) {
   for (let i = 0; i < queue.length; i++) runTop(queue[i]);
 }
@@ -1634,16 +1676,22 @@ function runUserEffects(queue: Computation<any>[]) {
 
 function lookUpstream(node: Computation<any>, ignore?: Computation<any>) {
   const runningTransition = Transition && Transition.running;
+  //获取事务执行状态
   if (runningTransition) node.tState = 0;
-  else node.state = 0;
+  //这在执行事务，直接将Computation的tState设置为0
+  else node.state = 0; //否则，将接将Computation的state设置为0
   for (let i = 0; i < node.sources!.length; i += 1) {
+    //遍历Computation的所有源
     const source = node.sources![i] as Memo<any>;
     if (source.sources) {
+      //这个源，还有依赖的源
       const state = runningTransition ? source.tState : source.state;
+      //得到该源的状态
       if (state === STALE) {
+        //如果该源的状态是陈旧的
         if (source !== ignore && (!source.updatedAt || source.updatedAt < ExecCount))
-          runTop(source);
-      } else if (state === PENDING) lookUpstream(source, ignore);
+          runTop(source); //对该源进行解决
+      } else if (state === PENDING) lookUpstream(source, ignore); //如果该源也是Pending状态，继续向上解决
     }
   }
 }
